@@ -13,6 +13,10 @@ Part of a three-repo system — see the [backend README](https://github.com/rahu
 | **[affiliate-dashboard](https://github.com/rahulkumar345/affiliate-dashboard)** (this repo) | Back-office web app (React + Vite) |
 | [affiliate-app](https://github.com/rahulkumar345/affiliate-app) | Affiliate mobile app (React Native / Expo) |
 
+## Live demo
+
+**https://affiliate-dashboard-roan-eta.vercel.app** — backed by the deployed API at `https://amplify-affiliate-api.onrender.com`. Log in with the demo accounts below. (Free-tier note: if the API has been idle, the first login takes ~50 s while it wakes.)
+
 ## Quickstart
 
 Prereq: the [backend](https://github.com/rahulkumar345/affiliate-backend) running and seeded (startup order: MongoDB → backend → this dashboard).
