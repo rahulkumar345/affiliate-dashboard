@@ -1,15 +1,29 @@
 import { useEffect, useState } from 'react';
 import { apiFetch, API_URL } from '../api/client.js';
 import { usd, shortDate } from '../lib/format.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Affiliates() {
+  const { userMap } = useAuth();
+  const canEdit = userMap.role === 'admin';
+
   const [affiliatesList, setAffiliatesList] = useState(null);
+  const [defaultRatePercent, setDefaultRatePercent] = useState(null);
   const [error, setError] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
 
+  // Inline rate-editing state (one row at a time)
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const [savingId, setSavingId] = useState(null);
+  const [rateError, setRateError] = useState(null);
+
   useEffect(() => {
     apiFetch('/api/admin/affiliates')
-      .then((dataMap) => setAffiliatesList(dataMap.affiliatesList))
+      .then((dataMap) => {
+        setAffiliatesList(dataMap.affiliatesList);
+        setDefaultRatePercent(dataMap.defaultRatePercent);
+      })
       .catch((err) => setError(err.message));
   }, []);
 
@@ -17,6 +31,44 @@ export default function Affiliates() {
     await navigator.clipboard.writeText(`${API_URL}/r/${affiliate.referralCode}`);
     setCopiedId(affiliate.id);
     setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const startEdit = (a) => {
+    setRateError(null);
+    setEditingId(a.id);
+    setEditValue(a.commissionRatePercent == null ? '' : String(a.commissionRatePercent));
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditValue('');
+    setRateError(null);
+  };
+
+  const saveRate = async (a) => {
+    setRateError(null);
+    const trimmed = editValue.trim();
+    // Blank input clears the override → affiliate reverts to the program default.
+    const nextRate = trimmed === '' ? null : Number(trimmed);
+    if (nextRate !== null && (Number.isNaN(nextRate) || nextRate < 0 || nextRate > 100)) {
+      setRateError('0–100, or blank for default');
+      return;
+    }
+    setSavingId(a.id);
+    try {
+      await apiFetch(`/api/admin/affiliates/${a.id}/rate`, {
+        method: 'PATCH',
+        bodyMap: { commissionRatePercent: nextRate },
+      });
+      setAffiliatesList((list) =>
+        list.map((x) => (x.id === a.id ? { ...x, commissionRatePercent: nextRate } : x))
+      );
+      cancelEdit();
+    } catch (err) {
+      setRateError(err.message);
+    } finally {
+      setSavingId(null);
+    }
   };
 
   if (error) return <div className="error-text">{error}</div>;
@@ -37,6 +89,7 @@ export default function Affiliates() {
               <th>Joined</th>
               <th className="num">Clicks</th>
               <th className="num">Conversions</th>
+              <th>Rate</th>
               <th className="num">Pending</th>
               <th className="num">Approved</th>
               <th className="num">Paid</th>
@@ -62,6 +115,45 @@ export default function Affiliates() {
                 <td className="muted">{shortDate(a.createdAt)}</td>
                 <td className="num">{a.clicksCount}</td>
                 <td className="num">{a.conversionsCount}</td>
+                <td>
+                  {editingId === a.id ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        value={editValue}
+                        placeholder={`${defaultRatePercent}`}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveRate(a);
+                          if (e.key === 'Escape') cancelEdit();
+                        }}
+                        style={{ width: 64, padding: '4px 6px' }}
+                        autoFocus
+                      />
+                      <button className="copy-btn" disabled={savingId === a.id} onClick={() => saveRate(a)}>
+                        {savingId === a.id ? '…' : 'save'}
+                      </button>
+                      <button className="copy-btn" onClick={cancelEdit}>cancel</button>
+                      {rateError ? <span className="error-text" style={{ fontSize: 11 }}>{rateError}</span> : null}
+                    </div>
+                  ) : (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {a.commissionRatePercent == null ? (
+                        <span className="muted">
+                          {defaultRatePercent}% <span style={{ fontSize: 11 }}>default</span>
+                        </span>
+                      ) : (
+                        <span className="strong">{a.commissionRatePercent}%</span>
+                      )}
+                      {canEdit ? (
+                        <button className="copy-btn" onClick={() => startEdit(a)}>edit</button>
+                      ) : null}
+                    </span>
+                  )}
+                </td>
                 <td className="num">{usd(a.pendingCents)}</td>
                 <td className="num">{usd(a.approvedCents)}</td>
                 <td className="num">{usd(a.paidCents)}</td>
