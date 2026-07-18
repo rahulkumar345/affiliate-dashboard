@@ -3,6 +3,17 @@ import { apiFetch, API_URL } from '../api/client.js';
 import { usd, shortDate } from '../lib/format.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
+// A commission rate is a percentage: blank (revert to default) or a number 0–100.
+function rateErrorFor(value) {
+  const trimmed = value.trim();
+  if (trimmed === '') return null; // blank clears the override → program default
+  const rate = Number(trimmed);
+  if (Number.isNaN(rate)) return 'Enter a number';
+  if (rate < 0) return "Rate can't be negative";
+  if (rate > 100) return "Rate can't exceed 100%";
+  return null;
+}
+
 export default function Affiliates() {
   const { userMap } = useAuth();
   const canEdit = userMap.role === 'admin';
@@ -16,7 +27,7 @@ export default function Affiliates() {
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [savingId, setSavingId] = useState(null);
-  const [rateError, setRateError] = useState(null);
+  const [saveError, setSaveError] = useState(null); // server-side errors only; range is validated live
 
   useEffect(() => {
     apiFetch('/api/admin/affiliates')
@@ -34,7 +45,7 @@ export default function Affiliates() {
   };
 
   const startEdit = (a) => {
-    setRateError(null);
+    setSaveError(null);
     setEditingId(a.id);
     setEditValue(a.commissionRatePercent == null ? '' : String(a.commissionRatePercent));
   };
@@ -42,19 +53,17 @@ export default function Affiliates() {
   const cancelEdit = () => {
     setEditingId(null);
     setEditValue('');
-    setRateError(null);
+    setSaveError(null);
   };
 
   const saveRate = async (a) => {
-    setRateError(null);
+    // Range is enforced live, but re-check here so Enter can't submit an invalid value.
+    if (rateErrorFor(editValue)) return;
     const trimmed = editValue.trim();
     // Blank input clears the override → affiliate reverts to the program default.
     const nextRate = trimmed === '' ? null : Number(trimmed);
-    if (nextRate !== null && (Number.isNaN(nextRate) || nextRate < 0 || nextRate > 100)) {
-      setRateError('0–100, or blank for default');
-      return;
-    }
     setSavingId(a.id);
+    setSaveError(null);
     try {
       await apiFetch(`/api/admin/affiliates/${a.id}/rate`, {
         method: 'PATCH',
@@ -65,7 +74,7 @@ export default function Affiliates() {
       );
       cancelEdit();
     } catch (err) {
-      setRateError(err.message);
+      setSaveError(err.message);
     } finally {
       setSavingId(null);
     }
@@ -73,6 +82,9 @@ export default function Affiliates() {
 
   if (error) return <div className="error-text">{error}</div>;
   if (!affiliatesList) return <div className="loading">Loading…</div>;
+
+  // Only one row edits at a time, so a single live-validation result covers it.
+  const liveError = editingId ? rateErrorFor(editValue) : null;
 
   return (
     <>
@@ -117,27 +129,37 @@ export default function Affiliates() {
                 <td className="num">{a.conversionsCount}</td>
                 <td>
                   {editingId === a.id ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.5"
-                        value={editValue}
-                        placeholder={`${defaultRatePercent}`}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') saveRate(a);
-                          if (e.key === 'Escape') cancelEdit();
-                        }}
-                        style={{ width: 64, padding: '4px 6px' }}
-                        autoFocus
-                      />
-                      <button className="copy-btn" disabled={savingId === a.id} onClick={() => saveRate(a)}>
-                        {savingId === a.id ? '…' : 'save'}
-                      </button>
-                      <button className="copy-btn" onClick={cancelEdit}>cancel</button>
-                      {rateError ? <span className="error-text" style={{ fontSize: 11 }}>{rateError}</span> : null}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input
+                          className={`rate-input${liveError ? ' invalid' : ''}`}
+                          type="text"
+                          inputMode="decimal"
+                          value={editValue}
+                          placeholder={`${defaultRatePercent}`}
+                          aria-invalid={Boolean(liveError)}
+                          onChange={(e) => { setEditValue(e.target.value); setSaveError(null); }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveRate(a);
+                            if (e.key === 'Escape') cancelEdit();
+                          }}
+                          autoFocus
+                        />
+                        <span className="muted">%</span>
+                        <button
+                          className="copy-btn"
+                          disabled={savingId === a.id || Boolean(liveError)}
+                          onClick={() => saveRate(a)}
+                        >
+                          {savingId === a.id ? '…' : 'save'}
+                        </button>
+                        <button className="copy-btn" onClick={cancelEdit}>cancel</button>
+                      </div>
+                      {liveError || saveError ? (
+                        <div className="error-text" style={{ fontSize: 11, margin: '4px 0 0' }}>
+                          {liveError || saveError}
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
